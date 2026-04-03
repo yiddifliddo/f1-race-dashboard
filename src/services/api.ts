@@ -6,17 +6,48 @@ import type {
 
 const BASE_URL = 'https://api.openf1.org/v1'
 
+// Simple in-memory cache to reduce API calls
+const cache = new Map<string, { data: unknown; timestamp: number }>()
+const CACHE_TTL = 8000 // 8 seconds
+
 async function fetchAPI<T>(endpoint: string, params: Record<string, string | number> = {}): Promise<T> {
   const url = new URL(`${BASE_URL}/${endpoint}`)
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, String(value))
   })
 
+  const cacheKey = url.toString()
+  const cached = cache.get(cacheKey)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data as T
+  }
+
   const response = await fetch(url.toString())
+
+  // Handle rate limiting - wait and retry once
+  if (response.status === 429) {
+    await new Promise((r) => setTimeout(r, 3000))
+    const retry = await fetch(url.toString())
+    if (!retry.ok) {
+      throw new Error(`API error: ${retry.status} ${retry.statusText}`)
+    }
+    const data = await retry.json()
+    cache.set(cacheKey, { data, timestamp: Date.now() })
+    return data
+  }
+
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`)
   }
-  return response.json()
+
+  const data = await response.json()
+  cache.set(cacheKey, { data, timestamp: Date.now() })
+  return data
+}
+
+// Stagger requests to avoid hitting rate limits
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 export const api = {
@@ -61,16 +92,6 @@ export const api = {
   getLocations: (sessionKey: string | number) =>
     fetchAPI<Location[]>('location', { session_key: sessionKey }),
 
-  getLatestLocations: (sessionKey: string | number) => {
-    // Get the latest position for all drivers
-    const now = new Date()
-    const fiveSecsAgo = new Date(now.getTime() - 5000).toISOString()
-    return fetchAPI<Location[]>('location', {
-      session_key: sessionKey,
-      'date>': fiveSecsAgo,
-    })
-  },
-
   // Weather
   getWeather: (sessionKey: string | number) =>
     fetchAPI<Weather[]>('weather', { session_key: sessionKey }),
@@ -78,4 +99,6 @@ export const api = {
   // Team Radio
   getTeamRadio: (sessionKey: string | number) =>
     fetchAPI<TeamRadio[]>('team_radio', { session_key: sessionKey }),
+
+  delay,
 }

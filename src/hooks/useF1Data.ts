@@ -6,7 +6,7 @@ import type {
   DriverTiming, IncidentSummary,
 } from '../types/f1'
 
-const POLL_INTERVAL = 5000 // 5 seconds
+const POLL_INTERVAL = 10000 // 10 seconds
 
 export interface F1DashboardData {
   session: Session | null
@@ -75,26 +75,27 @@ export function useF1Data(): F1DashboardData {
         if (meetings[0]) setMeeting(meetings[0])
       }
 
-      // Fetch all data in parallel
-      const [
-        driversData,
-        positionsData,
-        intervalsData,
-        lapsData,
-        pitStopsData,
-        stintsData,
-        raceControlData,
-        weatherData,
-        teamRadioData,
-        locationsData,
-      ] = await Promise.all([
-        initial ? api.getDrivers(sk) : Promise.resolve(drivers),
+      // Fetch data in staggered batches to avoid rate limits
+      const driversData = initial ? await api.getDrivers(sk) : drivers
+
+      // Batch 1: core timing data
+      const [positionsData, intervalsData, lapsData] = await Promise.all([
         api.getPositions(sk),
         api.getIntervals(sk),
         api.getLaps(sk),
+      ])
+      await api.delay(300)
+
+      // Batch 2: supplementary data
+      const [pitStopsData, stintsData, raceControlData] = await Promise.all([
         api.getPitStops(sk),
         api.getStints(sk),
         api.getRaceControl(sk),
+      ])
+      await api.delay(300)
+
+      // Batch 3: less critical data
+      const [weatherData, teamRadioData, locationsData] = await Promise.all([
         api.getWeather(sk),
         api.getTeamRadio(sk),
         api.getLocations(sk).catch(() => [] as Location[]),
