@@ -13,56 +13,38 @@ define('F1DASH_URI', get_template_directory_uri());
  * Enqueue dashboard assets built by Vite
  */
 function f1dash_enqueue_assets() {
-    $assets_dir = F1DASH_DIR . '/assets';
     $assets_uri = F1DASH_URI . '/assets';
 
-    // Enqueue built CSS
-    $css_files = glob($assets_dir . '/css/*.css');
-    if ($css_files) {
-        foreach ($css_files as $i => $css_file) {
-            $filename = basename($css_file);
-            wp_enqueue_style(
-                'f1dash-style-' . $i,
-                $assets_uri . '/css/' . $filename,
-                [],
-                F1DASH_VERSION
-            );
-        }
-    }
+    // Enqueue CSS
+    wp_enqueue_style(
+        'f1dash-styles',
+        $assets_uri . '/css/index.css',
+        [],
+        F1DASH_VERSION
+    );
 
-    // Enqueue built JS
-    $js_files = glob($assets_dir . '/js/*.js');
-    if ($js_files) {
-        foreach ($js_files as $i => $js_file) {
-            $filename = basename($js_file);
-            $is_main = strpos($filename, 'index') !== false;
-            wp_enqueue_script(
-                'f1dash-script-' . $i,
-                $assets_uri . '/js/' . $filename,
-                [],
-                F1DASH_VERSION,
-                true
-            );
-            if ($is_main) {
-                // Add type="module" for the main entry
-                add_filter('script_loader_tag', function($tag, $handle) use ($i) {
-                    if ($handle === 'f1dash-script-' . $i) {
-                        return str_replace(' src', ' type="module" src', $tag);
-                    }
-                    return $tag;
-                }, 10, 2);
-            }
-        }
-    }
-
-    // Pass configuration to JS
-    wp_localize_script('f1dash-script-0', 'f1dashConfig', [
-        'apiBase' => 'https://api.openf1.org/v1',
-        'themeUri' => F1DASH_URI,
-        'nonce' => wp_create_nonce('f1dash_nonce'),
-    ]);
+    // Enqueue JS - register then add module type
+    wp_register_script(
+        'f1dash-app',
+        $assets_uri . '/js/index.js',
+        [],
+        F1DASH_VERSION,
+        ['in_footer' => true, 'strategy' => 'defer']
+    );
+    wp_enqueue_script('f1dash-app');
 }
 add_action('wp_enqueue_scripts', 'f1dash_enqueue_assets');
+
+/**
+ * Add type="module" to our script tag
+ */
+function f1dash_script_type_module($tag, $handle, $src) {
+    if ($handle === 'f1dash-app') {
+        $tag = '<script type="module" src="' . esc_url($src) . '"></script>' . "\n";
+    }
+    return $tag;
+}
+add_filter('script_loader_tag', 'f1dash_script_type_module', 10, 3);
 
 /**
  * Theme setup
@@ -72,14 +54,6 @@ function f1dash_setup() {
     add_theme_support('html5', ['search-form', 'comment-form', 'comment-list', 'gallery', 'caption']);
 }
 add_action('after_setup_theme', 'f1dash_setup');
-
-/**
- * Add CORS headers for OpenF1 API proxy (optional)
- */
-function f1dash_add_cors_headers() {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET');
-}
 
 /**
  * Register REST API proxy endpoint for OpenF1
